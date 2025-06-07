@@ -9,6 +9,6 @@ database:
   password: postgres
   dbname: pyrolytics
   sslmode: disable
-
-nats:
-  url: nats://localhost:4222 
+  max_conns: 10
+  timeout: 5s
+  read_only: false
