@@ -4,10 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"pyrolytics/config"
 	"time"
 
-	"github.com/capy-engineer/pyrolytics/config"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/lib/pq"
 )
 
 type DB struct {
@@ -16,14 +16,16 @@ type DB struct {
 }
 
 func New(cfg *config.DatabaseConfig) (*DB, error) {
-	dsn := fmt.Sprintf("file:%s?mode=rwc&_journal_mode=%s&_timeout=%d&_busy_timeout=%d",
-		cfg.Path,
-		cfg.JournalMode,
-		int(cfg.Timeout.Seconds()*1000),
-		int(cfg.Timeout.Seconds()*1000),
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		cfg.Host,
+		cfg.Port,
+		cfg.User,
+		cfg.Password,
+		cfg.DBName,
+		cfg.SSLMode,
 	)
 
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/capy-engineer/pyrolytics/config"
-	"github.com/capy-engineer/pyrolytics/pkg/database"
+	"pyrolytics/config"
+	"pyrolytics/pkg/database"
 	"github.com/gin-gonic/gin"
 )
 
