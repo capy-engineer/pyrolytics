@@ -33,7 +33,13 @@ type DatabaseConfig struct {
 }
 
 type NATSConfig struct {
-	URL string
+	URL           string        `mapstructure:"url"`
+	Timeout       time.Duration `mapstructure:"timeout"`
+	MaxRetry      int           `mapstructure:"max_retry"`
+	StreamName    string        `mapstructure:"stream_name"`
+	StreamSubject string        `mapstructure:"stream_subject"`
+	MaxMessages   int           `mapstructure:"max_messages"`
+	MaxAge        string        `mapstructure:"max_age"`
 }
 
 // CacheConfig holds cache configuration
@@ -96,6 +102,10 @@ func setDefaults() {
 	viper.SetDefault("nats.url", "nats://localhost:4222")
 	viper.SetDefault("nats.timeout", 5*time.Second)
 	viper.SetDefault("nats.max_retry", 3)
+	viper.SetDefault("nats.stream_name", "pyrolytics")
+	viper.SetDefault("nats.stream_subject", "pyrolytics.>")
+	viper.SetDefault("nats.max_messages", 1000000)
+	viper.SetDefault("nats.max_age", "24h")
 
 	// Cache defaults
 	viper.SetDefault("cache.ttl", 1*time.Hour)

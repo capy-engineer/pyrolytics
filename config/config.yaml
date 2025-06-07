@@ -12,3 +12,12 @@ database:
   max_conns: 10
   timeout: 5s
   read_only: false
+
+nats:
+  url: nats://localhost:4222
+  timeout: 5s
+  max_retry: 3
+  stream_name: pyrolytics
+  stream_subject: pyrolytics.>
+  max_messages: 1000000
+  max_age: 24h
