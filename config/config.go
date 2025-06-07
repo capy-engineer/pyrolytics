@@ -21,7 +21,12 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Path string
+	Path string `mapstructure:"path"`
+	// Limbo specific configurations
+	MaxConns    int           `mapstructure:"max_conns"`
+	Timeout     time.Duration `mapstructure:"timeout"`
+	ReadOnly    bool          `mapstructure:"read_only"`
+	JournalMode string        `mapstructure:"journal_mode"`
 }
 
 type NATSConfig struct {
@@ -74,8 +79,11 @@ func setDefaults() {
 	viper.SetDefault("server.write_timeout", 10*time.Second)
 
 	// Database defaults
+	viper.SetDefault("database.path", "pyrolytic.db")
 	viper.SetDefault("database.max_conns", 10)
 	viper.SetDefault("database.timeout", 5*time.Second)
+	viper.SetDefault("database.read_only", false)
+	viper.SetDefault("database.journal_mode", "WAL")
 
 	// NATS defaults
 	viper.SetDefault("nats.url", "nats://localhost:4222")

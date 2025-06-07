@@ -9,10 +9,25 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/capy-engineer/pyrolytics/config"
+	"github.com/capy-engineer/pyrolytics/pkg/database"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
+	// Load configuration
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	// Initialize database
+	db, err := database.New(&cfg.Database)
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.Close()
+
 	// Initialize router
 	router := gin.Default()
 
