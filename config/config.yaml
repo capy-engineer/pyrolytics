@@ -21,3 +21,11 @@ nats:
   stream_subject: pyrolytics.>
   max_messages: 1000000
   max_age: 24h
+
+solana:
+  network: devnet
+  rpc_url: https://api.devnet.solana.com
+  ws_url: wss://api.devnet.solana.com
+  timeout: 30s
+  max_retries: 3
+  commitment: confirmed

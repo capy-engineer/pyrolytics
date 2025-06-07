@@ -13,6 +13,7 @@ type Config struct {
 	Database DatabaseConfig `mapstructure:"database"`
 	NATS     NATSConfig     `mapstructure:"nats"`
 	Cache    CacheConfig    `mapstructure:"cache"`
+	Solana   SolanaConfig   `mapstructure:"solana"`
 }
 
 type ServerConfig struct {
@@ -45,6 +46,15 @@ type NATSConfig struct {
 // CacheConfig holds cache configuration
 type CacheConfig struct {
 	TTL time.Duration `mapstructure:"ttl"`
+}
+
+type SolanaConfig struct {
+	Network    string        `mapstructure:"network"`     // devnet, testnet, mainnet
+	RPCURL     string        `mapstructure:"rpc_url"`     // HTTP RPC endpoint
+	WSURL      string        `mapstructure:"ws_url"`      // WebSocket endpoint
+	Timeout    time.Duration `mapstructure:"timeout"`     // Connection timeout
+	MaxRetries int           `mapstructure:"max_retries"` // Max retry attempts
+	Commitment string        `mapstructure:"commitment"`  // Commitment level
 }
 
 // LoadConfig loads the configuration from file and environment variables
@@ -109,6 +119,14 @@ func setDefaults() {
 
 	// Cache defaults
 	viper.SetDefault("cache.ttl", 1*time.Hour)
+
+	// Solana defaults
+	viper.SetDefault("solana.network", "devnet")
+	viper.SetDefault("solana.rpc_url", "https://api.devnet.solana.com")
+	viper.SetDefault("solana.ws_url", "wss://api.devnet.solana.com")
+	viper.SetDefault("solana.timeout", 30*time.Second)
+	viper.SetDefault("solana.max_retries", 3)
+	viper.SetDefault("solana.commitment", "confirmed")
 }
 
 // validateConfig validates the configuration values
