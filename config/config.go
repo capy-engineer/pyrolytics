@@ -2,14 +2,17 @@ package config
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/viper"
 )
 
+// Config represents the application configuration
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	NATS     NATSConfig
+	Server   ServerConfig   `mapstructure:"server"`
+	Database DatabaseConfig `mapstructure:"database"`
+	NATS     NATSConfig     `mapstructure:"nats"`
+	Cache    CacheConfig    `mapstructure:"cache"`
 }
 
 type ServerConfig struct {
@@ -18,18 +21,19 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Host     string
-	Port     int
-	User     string
-	Password string
-	DBName   string
-	SSLMode  string
+	Path string
 }
 
 type NATSConfig struct {
 	URL string
 }
 
+// CacheConfig holds cache configuration
+type CacheConfig struct {
+	TTL time.Duration `mapstructure:"ttl"`
+}
+
+// LoadConfig loads the configuration from file and environment variables
 func LoadConfig() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -38,9 +42,7 @@ func LoadConfig() (*Config, error) {
 	viper.AutomaticEnv()
 
 	// Set defaults
-	viper.SetDefault("server.port", 8080)
-	viper.SetDefault("server.host", "localhost")
-	viper.SetDefault("database.sslmode", "disable")
+	setDefaults()
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
@@ -56,16 +58,43 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 
+	if err := validateConfig(&config); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	return &config, nil
 }
 
-func GetDSN(config *DatabaseConfig) string {
-	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		config.Host,
-		config.Port,
-		config.User,
-		config.Password,
-		config.DBName,
-		config.SSLMode,
-	)
+// setDefaults sets default values for configuration
+func setDefaults() {
+	// Server defaults
+	viper.SetDefault("server.port", 8080)
+	viper.SetDefault("server.host", "localhost")
+	viper.SetDefault("server.read_timeout", 5*time.Second)
+	viper.SetDefault("server.write_timeout", 10*time.Second)
+
+	// Database defaults
+	viper.SetDefault("database.max_conns", 10)
+	viper.SetDefault("database.timeout", 5*time.Second)
+
+	// NATS defaults
+	viper.SetDefault("nats.url", "nats://localhost:4222")
+	viper.SetDefault("nats.timeout", 5*time.Second)
+	viper.SetDefault("nats.max_retry", 3)
+
+	// Cache defaults
+	viper.SetDefault("cache.ttl", 1*time.Hour)
+}
+
+// validateConfig validates the configuration values
+func validateConfig(cfg *Config) error {
+	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
+		return fmt.Errorf("invalid server port: %d", cfg.Server.Port)
+	}
+
+	if cfg.Cache.TTL <= 0 {
+		return fmt.Errorf("invalid cache TTL: %v", cfg.Cache.TTL)
+	}
+
+	return nil
 }
