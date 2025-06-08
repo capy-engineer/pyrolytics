@@ -10,7 +10,11 @@ import (
 	"time"
 
 	"pyrolytics/config"
+	"pyrolytics/internal/event_ingestor/application"
+	"pyrolytics/internal/event_ingestor/domain"
 	"pyrolytics/pkg/database"
+
+	"github.com/gagliardetto/solana-go"
 	"github.com/gin-gonic/gin"
 )
 
@@ -25,6 +29,26 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
+
+	dexSubscriber := application.NewDEXSubscriber(cfg)
+	defer dexSubscriber.Close()
+
+	programs := map[solana.PublicKey]string{
+		domain.RaydiumAMMV4Devnet:   "Raydium-AMMV4",
+		domain.RaydiumCPMMDevnet:    "Raydium-CPMM",
+		domain.RaydiumCLMMDevnet:    "Raydium-CLMM",
+		domain.RaydiumRoutingDevnet: "Raydium-Routing",
+		// Note: Orca addresses might need to be updated for Devnet
+		// OrcaWhirlpoolProgram: "Orca-Whirlpool",
+	}
+
+	for programID, name := range programs {
+		if err := dexSubscriber.SubscribeToProgram(programID, name); err != nil {
+			log.Printf("❌ Failed to subscribe to %s: %v", name, err)
+		} else {
+			log.Printf("✅ Successfully subscribed to %s", name)
+		}
+	}
 
 	router := gin.Default()
 

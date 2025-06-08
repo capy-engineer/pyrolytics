@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config represents the application configuration
 type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
 	Database DatabaseConfig `mapstructure:"database"`
