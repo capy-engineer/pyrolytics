@@ -15,12 +15,16 @@ database:
 
 nats:
   url: nats://localhost:4222
-  timeout: 5s
-  max_retry: 3
+  reconnect_wait: 5s
+  max_reconnects: 3
+  connection_name: pyrolytics
   stream_name: pyrolytics
-  stream_subject: pyrolytics.>
-  max_messages: 1000000
+  stream_subjects: 
+    - pyrolytics.>
+  retention_policy: workqueue
+  storage_type: file
   max_age: 24h
+  replicas: 1
 
 solana:
   network: devnet

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/spf13/viper"
 )
 
@@ -34,13 +35,47 @@ type DatabaseConfig struct {
 }
 
 type NATSConfig struct {
-	URL           string        `mapstructure:"url"`
-	Timeout       time.Duration `mapstructure:"timeout"`
-	MaxRetry      int           `mapstructure:"max_retry"`
-	StreamName    string        `mapstructure:"stream_name"`
-	StreamSubject string        `mapstructure:"stream_subject"`
-	MaxMessages   int           `mapstructure:"max_messages"`
-	MaxAge        string        `mapstructure:"max_age"`
+	URL             string        `mapstructure:"url"`
+	ReconnectWait   time.Duration `mapstructure:"reconnect_wait"`
+	MaxReconnects   int           `mapstructure:"max_reconnects"`
+	ConnectionName  string        `mapstructure:"connection_name"`
+	StreamName      string        `mapstructure:"stream_name"`
+	StreamSubjects  []string      `mapstructure:"stream_subjects"`
+	RetentionPolicy string        `mapstructure:"retention_policy"`
+	StorageType     string        `mapstructure:"storage_type"`
+	MaxAge          string        `mapstructure:"max_age"`
+	Replicas        int           `mapstructure:"replicas"`
+}
+
+// GetRetentionPolicy converts the string retention policy to nats.RetentionPolicy
+func (c *NATSConfig) GetRetentionPolicy() nats.RetentionPolicy {
+	switch c.RetentionPolicy {
+	case "workqueue":
+		return nats.WorkQueuePolicy
+	case "limits":
+		return nats.LimitsPolicy
+	case "interest":
+		return nats.InterestPolicy
+	default:
+		return nats.WorkQueuePolicy
+	}
+}
+
+// GetStorageType converts the string storage type to nats.StorageType
+func (c *NATSConfig) GetStorageType() nats.StorageType {
+	switch c.StorageType {
+	case "memory":
+		return nats.MemoryStorage
+	case "file":
+		return nats.FileStorage
+	default:
+		return nats.FileStorage
+	}
+}
+
+// GetMaxAge converts the string max age to time.Duration
+func (c *NATSConfig) GetMaxAge() (time.Duration, error) {
+	return time.ParseDuration(c.MaxAge)
 }
 
 // CacheConfig holds cache configuration
@@ -110,12 +145,15 @@ func setDefaults() {
 
 	// NATS defaults
 	viper.SetDefault("nats.url", "nats://localhost:4222")
-	viper.SetDefault("nats.timeout", 5*time.Second)
-	viper.SetDefault("nats.max_retry", 3)
+	viper.SetDefault("nats.reconnect_wait", 5*time.Second)
+	viper.SetDefault("nats.max_reconnects", 3)
+	viper.SetDefault("nats.connection_name", "pyrolytics")
 	viper.SetDefault("nats.stream_name", "pyrolytics")
-	viper.SetDefault("nats.stream_subject", "pyrolytics.>")
-	viper.SetDefault("nats.max_messages", 1000000)
+	viper.SetDefault("nats.stream_subjects", []string{"pyrolytics.>"})
+	viper.SetDefault("nats.retention_policy", "workqueue")
+	viper.SetDefault("nats.storage_type", "file")
 	viper.SetDefault("nats.max_age", "24h")
+	viper.SetDefault("nats.replicas", 1)
 
 	// Cache defaults
 	viper.SetDefault("cache.ttl", 1*time.Hour)
@@ -137,6 +175,10 @@ func validateConfig(cfg *Config) error {
 
 	if cfg.Cache.TTL <= 0 {
 		return fmt.Errorf("invalid cache TTL: %v", cfg.Cache.TTL)
+	}
+
+	if _, err := cfg.NATS.GetMaxAge(); err != nil {
+		return fmt.Errorf("invalid NATS max age: %v", err)
 	}
 
 	return nil
