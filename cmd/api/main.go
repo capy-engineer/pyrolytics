@@ -10,62 +10,74 @@ import (
 	"time"
 
 	"pyrolytics/config"
+	"pyrolytics/internal/event_ingestor/application"
+	"pyrolytics/internal/event_ingestor/domain"
 	"pyrolytics/pkg/database"
+
+	"github.com/gagliardetto/solana-go"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	// Load configuration
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Initialize database
 	db, err := database.New(&cfg.Database)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
 
-	// Initialize router
+	dexSubscriber := application.NewDEXSubscriber(cfg)
+	defer dexSubscriber.Close()
+
+	programs := map[solana.PublicKey]string{
+		domain.RaydiumAMMV4Devnet:   "Raydium-AMMV4",
+		domain.RaydiumCPMMDevnet:    "Raydium-CPMM",
+		domain.RaydiumCLMMDevnet:    "Raydium-CLMM",
+		domain.RaydiumRoutingDevnet: "Raydium-Routing",
+		// Note: Orca addresses might need to be updated for Devnet
+		// OrcaWhirlpoolProgram: "Orca-Whirlpool",
+	}
+
+	for programID, name := range programs {
+		if err := dexSubscriber.SubscribeToProgram(programID, name); err != nil {
+			log.Printf("❌ Failed to subscribe to %s: %v", name, err)
+		} else {
+			log.Printf("✅ Successfully subscribed to %s", name)
+		}
+	}
+
 	router := gin.Default()
 
-	// Add middleware
 	router.Use(gin.Recovery())
 	router.Use(gin.Logger())
 
-	// Health check endpoint
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
-		})
+	router.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, "pong")
 	})
 
-	// Create server
 	srv := &http.Server{
 		Addr:    ":8080",
 		Handler: router,
 	}
 
-	// Start server in a goroutine
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v\n", err)
 		}
 	}()
 
-	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("Shutting down server...")
 
-	// Create shutdown context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Attempt graceful shutdown
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatal("Server forced to shutdown:", err)
 	}

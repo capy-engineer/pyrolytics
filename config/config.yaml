@@ -12,3 +12,24 @@ database:
   max_conns: 10
   timeout: 5s
   read_only: false
+
+nats:
+  url: nats://localhost:4222
+  reconnect_wait: 5s
+  max_reconnects: 3
+  connection_name: pyrolytics
+  stream_name: pyrolytics
+  stream_subjects:  
+    - pyrolytics.>
+  retention_policy: workqueue
+  storage_type: file
+  max_age: 24h
+  replicas: 1
+
+solana:
+  network: devnet
+  rpc_url: https://devnet.helius-rpc.com/?api-key=c1f01c2e-07b3-48a5-b6df-25fe2043d995
+  ws_url: wss://devnet.helius-rpc.com/?api-key=c1f01c2e-07b3-48a5-b6df-25fe2043d995
+  timeout: 30s
+  max_retries: 3
+  commitment: confirmed
