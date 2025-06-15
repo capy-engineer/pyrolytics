@@ -3,6 +3,7 @@ module pyrolytics
 go 1.24.2
 
 require (
+	github.com/bytedance/sonic v1.11.6
 	github.com/lib/pq v1.10.9
 	github.com/spf13/viper v1.20.1
 )
@@ -12,7 +13,6 @@ require (
 	github.com/andres-erbsen/clock v0.0.0-20160526145045-9e14626cd129 // indirect
 	github.com/blendle/zapdriver v1.3.1 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
-	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect
 	github.com/cloudwego/iasm v0.2.0 // indirect
@@ -50,7 +50,7 @@ require (
 	go.uber.org/zap v1.21.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
-	golang.org/x/net v0.33.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/term v0.31.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
 	google.golang.org/protobuf v1.36.1 // indirect
