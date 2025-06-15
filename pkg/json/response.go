@@ -18,36 +18,28 @@ type SonicJSON struct {
 }
 
 func (r SonicJSON) Render(w http.ResponseWriter) error {
-
 	jsonBytes, err := jsonAPI.Marshal(r.Data)
-
 	if err != nil {
-
 		return err
-
 	}
-
 	_, err = w.Write(jsonBytes)
-
 	return err
-
 }
 
 func (r SonicJSON) WriteContentType(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 }
 
-var (
-	jsonAPI = sonic.Config{
-		UseNumber:            true,
-		EscapeHTML:           false,
-		SortMapKeys:          false,
-		CompactMarshaler:     true,
-		NoQuoteTextMarshaler: true,
-		NoNullSliceOrMap:     true,
-	}.Froze()
+var jsonAPI = sonic.Config{
+	UseNumber:            true,
+	EscapeHTML:           false,
+	SortMapKeys:          false,
+	CompactMarshaler:     true,
+	NoQuoteTextMarshaler: true,
+	NoNullSliceOrMap:     true,
+}.Froze()
 
-	// Pre-marshal only the most common responses
+var (
 	successResponse       = mustMarshal(Response{Code: 200, Message: "Success"})
 	createdResponse       = mustMarshal(Response{Code: 201, Message: "Created"})
 	notFoundResponse      = mustMarshal(Response{Code: 404, Message: "Not Found"})
@@ -63,7 +55,6 @@ func mustMarshal(v interface{}) []byte {
 }
 
 func ResponseJSON(c *gin.Context, httpCode int, message string, data interface{}) {
-	// Use precomputed responses only for exact matches
 	if data == nil {
 		switch httpCode {
 		case 200:
@@ -104,7 +95,6 @@ func ResponseJSON(c *gin.Context, httpCode int, message string, data interface{}
 		}
 	}
 
-	// Fallback to dynamic marshaling
 	c.Render(httpCode, SonicJSON{Data: Response{
 		Code:    httpCode,
 		Message: message,
