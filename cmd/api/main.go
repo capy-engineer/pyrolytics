@@ -13,6 +13,7 @@ import (
 	"pyrolytics/internal/event_ingestor/application"
 	"pyrolytics/internal/event_ingestor/domain"
 	"pyrolytics/pkg/database"
+	"pyrolytics/pkg/messaging"
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/gin-gonic/gin"
@@ -30,7 +31,12 @@ func main() {
 	}
 	defer db.Close()
 
-	dexSubscriber := application.NewDEXSubscriber(cfg)
+	natsClient, err := messaging.NewNatsClient(&cfg.NATS)
+	if err != nil {
+		log.Fatalf("Failed to initialize NATS client: %v", err)
+	}
+
+	dexSubscriber := application.NewDEXSubscriber(cfg, natsClient)
 	defer dexSubscriber.Close()
 
 	programs := map[solana.PublicKey]string{
@@ -49,6 +55,9 @@ func main() {
 			log.Printf("✅ Successfully subscribed to %s", name)
 		}
 	}
+
+	log.Printf("👂 Listening for DEX events and publishing to NATS stream: %s", natsClient.StreamCfg.Name)
+	log.Printf("📡 NATS Subject pattern: %s.*.*", natsClient.StreamCfg.Subjects)
 
 	router := gin.Default()
 

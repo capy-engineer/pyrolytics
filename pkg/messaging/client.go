@@ -3,9 +3,12 @@ package messaging
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"pyrolytics/config"
+	"pyrolytics/internal/event_ingestor/domain"
 
+	"github.com/bytedance/sonic"
 	"github.com/nats-io/nats.go"
 )
 
@@ -49,12 +52,13 @@ func NewNatsClient(cfg *config.NATSConfig) (*NatsClient, error) {
 	}
 
 	streamCfg := &nats.StreamConfig{
-		Name:      cfg.StreamName,
-		Subjects:  cfg.StreamSubjects,
-		Retention: cfg.GetRetentionPolicy(),
-		Storage:   cfg.GetStorageType(),
-		MaxAge:    maxAge,
-		Replicas:  cfg.Replicas,
+		Name:        cfg.StreamName,
+		Description: "Solana blockchain raw events stream",
+		Subjects:    cfg.StreamSubjects,
+		Retention:   cfg.GetRetentionPolicy(),
+		Storage:     cfg.GetStorageType(),
+		MaxAge:      maxAge,
+		Replicas:    cfg.Replicas,
 	}
 
 	_, err = js.AddStream(streamCfg)
@@ -70,11 +74,21 @@ func NewNatsClient(cfg *config.NATSConfig) (*NatsClient, error) {
 	}, nil
 }
 
-func (c *NatsClient) Publish(ctx context.Context, subject string, data []byte) error {
-	_, err := c.JS.Publish(subject, data)
+func (c *NatsClient) Publish(ctx context.Context, event *domain.SolanaRawEvent) error {
+	eventData, err := sonic.ConfigFastest.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+
+	subject := fmt.Sprintf("%s.%s.%s", c.StreamCfg.Name, event.DEXName, event.EventType)
+
+	_, err = c.JS.Publish(subject, eventData)
 	if err != nil {
 		return fmt.Errorf("failed to publish message: %w", err)
 	}
+
+	log.Printf("📤 Published event to NATS: %s (signature: %s)", subject, event.Signature[:16]+"...")
+
 	return nil
 }
 
