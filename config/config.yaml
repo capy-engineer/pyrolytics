@@ -18,9 +18,9 @@ nats:
   reconnect_wait: 5s
   max_reconnects: 3
   connection_name: pyrolytics
-  stream_name: SOLANA_RAW_EVENTS
+  stream_name: pyrolytics
   stream_subjects:  
-    - events.raw.solana
+    - pyrolytics.>
   retention_policy: workqueue
   storage_type: file
   max_age: 24h

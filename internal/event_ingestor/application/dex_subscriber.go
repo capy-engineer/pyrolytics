@@ -6,7 +6,6 @@ import (
 	"log"
 	"pyrolytics/config"
 	"pyrolytics/internal/event_ingestor/domain"
-	"pyrolytics/pkg/messaging"
 	"strings"
 	"time"
 
@@ -21,10 +20,9 @@ type DEXSubscriber struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	subscribers map[string]*ws.LogSubscription
-	natsClient  *messaging.NatsClient
 }
 
-func NewDEXSubscriber(cfg *config.Config, natsClient *messaging.NatsClient) *DEXSubscriber {
+func NewDEXSubscriber(cfg *config.Config) *DEXSubscriber {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Connect to Devnet
@@ -41,7 +39,6 @@ func NewDEXSubscriber(cfg *config.Config, natsClient *messaging.NatsClient) *DEX
 		ctx:         ctx,
 		cancel:      cancel,
 		subscribers: make(map[string]*ws.LogSubscription),
-		natsClient:  natsClient,
 	}
 }
 
@@ -56,9 +53,10 @@ func (ds *DEXSubscriber) Close() {
 func (ds *DEXSubscriber) SubscribeToProgram(programID solana.PublicKey, programName string) error {
 	log.Printf("🔗 Subscribing to %s program: %s", programName, programID.String())
 
+	// Subscribe to logs mentioning this program
 	sub, err := ds.wsClient.LogsSubscribeMentions(
 		programID,
-		rpc.CommitmentProcessed,
+		rpc.CommitmentProcessed, // Use processed for faster updates, finalized for more reliable
 	)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s logs: %w", programName, err)
@@ -90,246 +88,55 @@ func (ds *DEXSubscriber) listenForEvents(sub *ws.LogSubscription, programName st
 	}
 }
 
+// processLogEvent analyzes and processes individual log events
 func (ds *DEXSubscriber) processLogEvent(result *ws.LogResult, programName string, programID solana.PublicKey) {
-	logs := result.Value.Logs
-	signature := result.Value.Signature.String()
-	isSuccess := result.Value.Err == nil
-
-	// Filter for swap-related events
-	if ds.isSwapRelated(logs) || ds.isLiquidityRelated(logs) {
-
-		// Create structured event
-		event := ds.createSolanaRawEvent(result, programName, programID, logs, isSuccess)
-
-		// Fetch additional transaction details asynchronously
-		go ds.enrichEventWithTransactionDetails(event, signature)
-
-		// Display event for debugging
-		ds.displayEvent(event)
-
-		// Publish to NATS JetStream
-		if err := ds.natsClient.Publish(ds.ctx, event); err != nil {
-			log.Printf("❌ Failed to publish event to NATS: %v", err)
-		}
-	}
-}
-
-// createSolanaRawEvent creates a structured event from log data
-func (ds *DEXSubscriber) createSolanaRawEvent(result *ws.LogResult, programName string, programID solana.PublicKey, logs []string, isSuccess bool) *domain.SolanaRawEvent {
-	signature := result.Value.Signature.String()
-
-	// Generate unique event ID
-	eventID := fmt.Sprintf("%s_%d_%d", signature, result.Context.Slot, time.Now().UnixNano())
-
-	// Determine event type
-	eventType := ds.determineEventType(logs)
-
-	// Parse DEX-specific data
-	parsedData := ds.parseSwapData(logs, programName)
-
-	// Extract swap details if it's a swap event
-	var swapDetails *domain.SwapDetails
-	if eventType == "swap" {
-		swapDetails = ds.extractSwapDetails(logs, parsedData, programName)
-	}
-
-	event := &domain.SolanaRawEvent{
-		EventID:     eventID,
-		EventType:   eventType,
-		Blockchain:  "solana",
-		Network:     "devnet",
-		Timestamp:   time.Now(),
-		Signature:   signature,
-		Slot:        result.Context.Slot,
-		Success:     isSuccess,
-		DEXName:     ds.extractDEXName(programName),
-		DEXProgram:  ds.extractDEXProgram(programName),
-		ProgramID:   programID.String(),
-		SwapDetails: swapDetails,
-		RawLogs:     logs,
-		ParsedData:  parsedData,
-	}
-
-	return event
-}
-
-// enrichEventWithTransactionDetails fetches and adds transaction details
-func (ds *DEXSubscriber) enrichEventWithTransactionDetails(event *domain.SolanaRawEvent, signature string) {
-	sig := solana.MustSignatureFromBase58(signature)
-
-	maxSupportedVersion := uint64(0)
-	tx, err := ds.rpcClient.GetTransaction(
-		context.Background(),
-		sig,
-		&rpc.GetTransactionOpts{
-			Encoding:                       solana.EncodingBase64,
-			MaxSupportedTransactionVersion: &maxSupportedVersion,
-		},
-	)
-	if err != nil {
-		log.Printf("❌ Failed to fetch transaction %s: %v", signature, err)
+	if result.Value.Err != nil {
+		// Skip failed transactions
 		return
 	}
 
-	// Enrich event with transaction details
-	if tx.BlockTime != nil {
-		unixTime := tx.BlockTime.Time().Unix()
-		event.BlockTime = &unixTime
-	}
+	logs := result.Value.Logs
+	signature := result.Value.Signature.String()
 
-	if tx.Meta != nil {
-		event.Fee = tx.Meta.Fee
-
-		// Extract token balance changes
-		event.TokenBalanceChanges = ds.extractTokenBalanceChanges(tx.Meta)
-	}
-
-	// Re-publish updated event
-	if err := ds.natsClient.Publish(ds.ctx, event); err != nil {
-		log.Printf("❌ Failed to re-publish enriched event to NATS: %v", err)
-	}
-}
-
-// extractTokenBalanceChanges extracts token balance changes from transaction meta
-func (ds *DEXSubscriber) extractTokenBalanceChanges(meta *rpc.TransactionMeta) []domain.TokenBalanceChange {
-	var changes []domain.TokenBalanceChange
-
-	// Compare pre and post token balances
-	for i, preBalance := range meta.PreTokenBalances {
-		if i < len(meta.PostTokenBalances) {
-			postBalance := meta.PostTokenBalances[i]
-
-			// Calculate change
-			change := "0"
-			if preBalance.UiTokenAmount.Amount != postBalance.UiTokenAmount.Amount {
-				// Simple string-based calculation (for production, use decimal arithmetic)
-				change = fmt.Sprintf("%.6f", *postBalance.UiTokenAmount.UiAmount-*preBalance.UiTokenAmount.UiAmount)
-			}
-
-			changes = append(changes, domain.TokenBalanceChange{
-				AccountIndex: uint8(preBalance.AccountIndex),
-				Mint:         preBalance.Mint.String(),
-				Owner:        preBalance.Owner.String(),
-				PreBalance:   preBalance.UiTokenAmount.Amount,
-				PostBalance:  postBalance.UiTokenAmount.Amount,
-				Change:       change,
-				Decimals:     preBalance.UiTokenAmount.Decimals,
-			})
+	// Filter for swap-related events
+	if ds.isSwapRelated(logs) {
+		swapEvent := domain.SwapEventData{
+			Program:   programName,
+			Signature: signature,
+			Slot:      result.Context.Slot,
+			Timestamp: time.Now(),
+			Logs:      logs,
 		}
-	}
 
-	return changes
-}
+		// Parse specific event data based on the program
+		swapEvent.ParsedData = ds.parseSwapData(logs, programName)
 
-// determineEventType determines the type of event based on logs
-func (ds *DEXSubscriber) determineEventType(logs []string) string {
-	for _, log := range logs {
-		logLower := strings.ToLower(log)
-		if strings.Contains(logLower, "swap") {
-			return "swap"
-		}
-		if strings.Contains(logLower, "addliquidity") || strings.Contains(logLower, "increase") {
-			return "liquidity_add"
-		}
-		if strings.Contains(logLower, "removeliquidity") || strings.Contains(logLower, "decrease") {
-			return "liquidity_remove"
-		}
-	}
-	return "unknown"
-}
+		ds.displaySwapEvent(swapEvent)
 
-// extractDEXName extracts DEX name from program name
-func (ds *DEXSubscriber) extractDEXName(programName string) string {
-	if strings.Contains(programName, "Raydium") {
-		return "Raydium"
+		// Optionally fetch full transaction details
+		go ds.fetchTransactionDetails(signature, programName)
 	}
-	if strings.Contains(programName, "Orca") {
-		return "Orca"
-	}
-	return "Unknown"
-}
-
-// extractDEXProgram extracts DEX program type from program name
-func (ds *DEXSubscriber) extractDEXProgram(programName string) string {
-	if strings.Contains(programName, "AMMV4") {
-		return "AMM_V4"
-	}
-	if strings.Contains(programName, "CPMM") {
-		return "CPMM"
-	}
-	if strings.Contains(programName, "CLMM") {
-		return "CLMM"
-	}
-	if strings.Contains(programName, "Whirlpool") {
-		return "Whirlpool"
-	}
-	if strings.Contains(programName, "Routing") {
-		return "Routing"
-	}
-	return "Unknown"
-}
-
-// extractSwapDetails extracts swap-specific details from logs and parsed data
-func (ds *DEXSubscriber) extractSwapDetails(logs []string, parsedData map[string]interface{}, programName string) *domain.SwapDetails {
-	details := &domain.SwapDetails{}
-
-	// Extract information from logs
-	for _, log := range logs {
-		if strings.Contains(log, "SwapBaseIn") {
-			details.Direction = "buy"
-			// Extract amount if possible
-			if parts := strings.Split(log, ": "); len(parts) > 1 {
-				details.AmountIn = parts[1]
-			}
-		}
-		if strings.Contains(log, "SwapBaseOut") {
-			details.Direction = "sell"
-			if parts := strings.Split(log, ": "); len(parts) > 1 {
-				details.AmountOut = parts[1]
-			}
-		}
-	}
-
-	// Extract from parsed data
-	if direction, ok := parsedData["swap_direction"].(string); ok {
-		details.Direction = direction
-	}
-	if amountIn, ok := parsedData["amount_in"].(string); ok {
-		details.AmountIn = amountIn
-	}
-	if amountOut, ok := parsedData["amount_out"].(string); ok {
-		details.AmountOut = amountOut
-	}
-
-	return details
 }
 
 // isSwapRelated checks if logs contain swap-related keywords
 func (ds *DEXSubscriber) isSwapRelated(logs []string) bool {
 	swapKeywords := []string{
-		"swap", "Swap", "trade", "Trade", "exchange", "Exchange",
-		"buy", "sell", "Buy", "Sell", "SwapBaseIn", "SwapBaseOut",
+		"swap",
+		"Swap",
+		"trade",
+		"Trade",
+		"exchange",
+		"Exchange",
+		"buy",
+		"sell",
+		"Buy",
+		"Sell",
+		"InstructionData",
 	}
 
-	return ds.containsKeywords(logs, swapKeywords)
-}
-
-// isLiquidityRelated checks if logs contain liquidity-related keywords
-func (ds *DEXSubscriber) isLiquidityRelated(logs []string) bool {
-	liquidityKeywords := []string{
-		"addliquidity", "AddLiquidity", "removeliquidity", "RemoveLiquidity",
-		"increaseliquidity", "IncreaseLiquidity", "decreaseliquidity", "DecreaseLiquidity",
-		"deposit", "withdraw", "Deposit", "Withdraw",
-	}
-
-	return ds.containsKeywords(logs, liquidityKeywords)
-}
-
-// containsKeywords checks if logs contain any of the specified keywords
-func (ds *DEXSubscriber) containsKeywords(logs []string, keywords []string) bool {
 	for _, log := range logs {
 		logLower := strings.ToLower(log)
-		for _, keyword := range keywords {
+		for _, keyword := range swapKeywords {
 			if strings.Contains(logLower, strings.ToLower(keyword)) {
 				return true
 			}
@@ -338,18 +145,18 @@ func (ds *DEXSubscriber) containsKeywords(logs []string, keywords []string) bool
 	return false
 }
 
-// parseSwapData extracts swap-specific information from logs (keeping existing logic)
+// parseSwapData extracts swap-specific information from logs
 func (ds *DEXSubscriber) parseSwapData(logs []string, programName string) map[string]interface{} {
 	data := make(map[string]interface{})
 
-	switch {
-	case strings.Contains(programName, "AMMV4"):
+	switch programName {
+	case "Raydium-AMMV4":
 		data = ds.parseRaydiumLogs(logs)
-	case strings.Contains(programName, "CPMM"):
+	case "Raydium-CPMM":
 		data = ds.parseRaydiumCPMMLogs(logs)
-	case strings.Contains(programName, "CLMM"):
+	case "Raydium-CLMM":
 		data = ds.parseRaydiumCLMMLogs(logs)
-	case strings.Contains(programName, "Orca"):
+	case "Orca-Whirlpool":
 		data = ds.parseOrcaLogs(logs)
 	}
 
@@ -428,26 +235,13 @@ func (ds *DEXSubscriber) parseOrcaLogs(logs []string) map[string]interface{} {
 	return data
 }
 
-// displayEvent prints formatted event information
-func (ds *DEXSubscriber) displayEvent(event *domain.SolanaRawEvent) {
+// displaySwapEvent prints formatted swap event information
+func (ds *DEXSubscriber) displaySwapEvent(event domain.SwapEventData) {
 	fmt.Println("\n" + strings.Repeat("=", 80))
-	fmt.Printf("🔄 %s EVENT on %s (%s)\n", strings.ToUpper(event.EventType), event.DEXName, event.DEXProgram)
-	fmt.Printf("📝 Event ID: %s\n", event.EventID)
+	fmt.Printf("🔄 SWAP DETECTED on %s\n", event.Program)
 	fmt.Printf("📝 Signature: %s\n", event.Signature)
 	fmt.Printf("📍 Slot: %d\n", event.Slot)
 	fmt.Printf("⏰ Time: %s\n", event.Timestamp.Format("2006-01-02 15:04:05"))
-	fmt.Printf("✅ Success: %v\n", event.Success)
-
-	if event.SwapDetails != nil {
-		fmt.Printf("🔄 Swap Details:\n")
-		fmt.Printf("   Direction: %s\n", event.SwapDetails.Direction)
-		if event.SwapDetails.AmountIn != "" {
-			fmt.Printf("   Amount In: %s\n", event.SwapDetails.AmountIn)
-		}
-		if event.SwapDetails.AmountOut != "" {
-			fmt.Printf("   Amount Out: %s\n", event.SwapDetails.AmountOut)
-		}
-	}
 
 	if len(event.ParsedData) > 0 {
 		fmt.Printf("📊 Parsed Data:\n")
@@ -456,5 +250,53 @@ func (ds *DEXSubscriber) displayEvent(event *domain.SolanaRawEvent) {
 		}
 	}
 
+	fmt.Printf("📜 Raw Logs:\n")
+	for i, log := range event.Logs {
+		fmt.Printf("   [%d] %s\n", i, log)
+	}
 	fmt.Println(strings.Repeat("=", 80))
+}
+
+// fetchTransactionDetails gets full transaction information
+func (ds *DEXSubscriber) fetchTransactionDetails(signature string, programName string) {
+	sig := solana.MustSignatureFromBase58(signature)
+
+	maxSupportedVersion := uint64(0)
+	tx, err := ds.rpcClient.GetTransaction(
+		context.Background(),
+		sig,
+		&rpc.GetTransactionOpts{
+			Encoding:                       solana.EncodingBase64,
+			MaxSupportedTransactionVersion: &maxSupportedVersion,
+		},
+	)
+	if err != nil {
+		log.Printf("❌ Failed to fetch transaction %s: %v", signature, err)
+		return
+	}
+
+	fmt.Printf("\n🔍 Transaction Details for %s (%s):\n", signature[:16]+"...", programName)
+	fmt.Printf("   Slot: %d\n", tx.Slot)
+	fmt.Printf("   Block Time: %v\n", tx.BlockTime)
+
+	if tx.Meta != nil {
+		fmt.Printf("   Fee: %d lamports\n", tx.Meta.Fee)
+		if tx.Meta.Err != nil {
+			fmt.Printf("   Error: %v\n", tx.Meta.Err)
+		}
+
+		// Display token balance changes
+		if len(tx.Meta.PreTokenBalances) > 0 || len(tx.Meta.PostTokenBalances) > 0 {
+			fmt.Printf("   Token Balance Changes:\n")
+			for i, preBalance := range tx.Meta.PreTokenBalances {
+				if i < len(tx.Meta.PostTokenBalances) {
+					postBalance := tx.Meta.PostTokenBalances[i]
+					fmt.Printf("     Account %d: %s -> %s\n",
+						preBalance.AccountIndex,
+						preBalance.UiTokenAmount.Amount,
+						postBalance.UiTokenAmount.Amount)
+				}
+			}
+		}
+	}
 }
